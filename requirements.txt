@@ -1,0 +1,21 @@
+# OCR (핵심)
+paddlepaddle          # CPU. GPU면 paddlepaddle-gpu 로 교체
+paddleocr             # 3.x (PP-OCRv5 한국어)
+
+# 이미지·데이터·시각화
+opencv-python
+numpy
+pandas
+matplotlib
+Pillow
+
+# 웹 데모
+streamlit
+
+# EDA 노트북 생성
+nbformat
+
+# LLM 해석 (택1 이상)
+openai                # OpenAI (gpt-4o 등)
+google-genai          # Google Gemini
+# anthropic           # (선택) Claude

@@ -1,0 +1,33 @@
+# ── 보안: API 키 절대 커밋 금지 ──
+*_key.txt
+gemini_key.txt
+openai_key.txt
+.env
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+
+# ── 파이프라인 생성물(재생성 가능) ──
+data/explained.json
+data/generated_prompt.txt
+data/llm_cache.json
+
+# ── OCR 결과: benchmark만 남기고 나머지 생성물 제외 ──
+data/ocr_results/*
+!data/ocr_results/benchmark.csv
+!data/ocr_results/benchmark_chart.png
+
+# ── 빌드 산출물 ──
+menueye_colab_bundle.zip
+
+# ── OS/에디터 junk ──
+desktop.ini
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+
+# ── 로컬 dev 설정 ──
+.claude/
