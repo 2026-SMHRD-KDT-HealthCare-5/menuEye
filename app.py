@@ -5,7 +5,7 @@
 """
 import os
 os.environ.setdefault("FLAGS_enable_pir_api", "0")
-import sys, re, json, tempfile, hashlib, threading, time
+import sys, re, json, tempfile, hashlib, threading, time, pickle
 from pathlib import Path
 import numpy as np
 import cv2
@@ -70,6 +70,17 @@ def draw_boxes(bgr, lines):
     return out
 
 
+def show_img(col, bgr, caption, max_w=580, max_h=420):
+    """긴 세로 사진이 화면을 밀어 '해석하기' 버튼이 스크롤되지 않도록
+       미리보기 크기를 (최대 폭·높이)로 제한해 표시한다. OCR은 원본을 쓰므로 무관."""
+    h, w = bgr.shape[:2]
+    scale = min(max_w / w, max_h / h, 1.0)
+    if scale < 1.0:
+        bgr = cv2.resize(bgr, (max(1, int(w * scale)), max(1, int(h * scale))),
+                         interpolation=cv2.INTER_AREA)
+    col.image(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), caption=caption)
+
+
 def extract_names(lines):
     raw = M.merge_line_fragments(lines)
     names, seen = [], set()
@@ -103,11 +114,20 @@ def check_and_pick(provider, model):
     return False, None, last[:200]
 
 
-_OCR_CACHE = {}   # 이미지 해시 → OCR 결과 (프로세스 내 유지, 워커 스레드에서 접근 가능)
+# OCR 결과 영구 캐시(파일). 앱을 껐다 켜도 유지 → 시연 때 미리 한 번 데워두면
+# 동일 이미지는 재시작해도 즉시 표시(박스 시각화=인식 과정은 그대로 렌더된다).
+_OCR_CACHE_PATH = ROOT / "data" / "ocr_cache.pkl"
+_OCR_CACHE = {}   # 이미지 해시 → OCR 결과 (프로세스 내 + 파일 유지)
+if _OCR_CACHE_PATH.exists():
+    try:
+        _OCR_CACHE = pickle.loads(_OCR_CACHE_PATH.read_bytes())
+    except Exception:
+        _OCR_CACHE = {}
 
 
 def _ocr_raw(img_bytes, eng):
-    """OCR 실행(캐시 포함). Streamlit 호출이 없어 워커 스레드에서 안전."""
+    """OCR 실행(파일 캐시 포함). Streamlit 호출이 없어 워커 스레드에서 안전.
+       동일 이미지는 파일 캐시에서 즉시 반환 → 시연 시 재시작해도 빠르다."""
     h = hashlib.sha256(img_bytes).hexdigest()
     if h in _OCR_CACHE:
         return _OCR_CACHE[h]
@@ -116,13 +136,17 @@ def _ocr_raw(img_bytes, eng):
         tmp = tf.name
     lines = run_ocr.run_image(eng, tmp)
     _OCR_CACHE[h] = lines
+    try:
+        _OCR_CACHE_PATH.write_bytes(pickle.dumps(_OCR_CACHE))   # 파일로 영구 저장
+    except Exception:
+        pass
     return lines
 
 
 # ── UI ──
 st.title("🍚 MenuEye — 한식 메뉴판 다국어 해석기")
 st.caption("사진 한 장 → 글자 인식(PaddleOCR v5) → LLM이 소개·재료·맛·알레르기 주의를 다국어로 안내. "
-           "방한 외국인을 위한 메뉴 가이드. (추천/헬스케어 아님, 가격 미포함)")
+           "방한 외국인을 위한 메뉴 가이드. (추천, 가격 미포함)")
 
 eng = load_engine()   # 앱 시작 시 OCR 엔진 예열(최초 1회 ~20초, 이후 모든 해석이 빨라짐)
 
@@ -136,27 +160,28 @@ with st.sidebar:
     target = st.selectbox("번역 언어", ["English", "한국어", "日本語", "中文"], index=0)
     st.divider()
     st.caption("샘플 또는 직접 업로드")
-    _opts = ["(업로드 사용)"] + [p.name for p in sorted(KR_DIR.glob("*"))
-                              if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")]
-    _def = _opts.index("6.jpg") if "6.jpg" in _opts else (1 if len(_opts) > 1 else 0)
-    sample = st.selectbox("샘플 이미지", _opts, index=_def)
+    _imgs = sorted([p for p in KR_DIR.glob("*") if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")],
+                   key=lambda p: int(re.sub(r"\D", "", p.stem) or 0))   # 1,2,…,25 숫자순
+    _opts = ["— 선택하세요 —"] + [p.name for p in _imgs]
+    sample = st.selectbox("샘플 이미지", _opts, index=0)   # 첫 화면 = 깨끗한 랜딩(자동 선택 없음)
 
 up = st.file_uploader("메뉴판 이미지 업로드", type=["jpg", "jpeg", "png", "webp"])
 
 img_bytes, img_name = None, None
 if up is not None:
     img_bytes, img_name = up.read(), up.name
-elif sample != "(업로드 사용)":
+elif sample != "— 선택하세요 —":
     p = KR_DIR / sample
     img_bytes, img_name = p.read_bytes(), sample
 
 if img_bytes is None:
-    st.info("👈 왼쪽에서 샘플을 고르거나 이미지를 업로드하세요.")
+    st.info("👈 왼쪽 사이드바에서 **샘플 이미지**를 고르거나 메뉴판 사진을 **업로드**하세요.")
+    st.markdown("**사용 순서**  ①  이미지 선택 · 업로드  →  ②  🔍 해석하기  →  ③  요리별 다국어 카드")
     st.stop()
 
 bgr = imdecode(img_bytes)
 c1, c2 = st.columns(2)
-c1.image(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), caption=f"원본 · {img_name}", use_container_width=True)
+show_img(c1, bgr, f"원본 · {img_name}")
 
 if not st.button("🔍 해석하기", type="primary"):
     st.stop()
@@ -230,8 +255,7 @@ if R.get("pick_msg"):
 if R.get("cached"):
     st.caption("↺ 동일 입력 — 캐시된 해석 사용 (API 호출 생략)")
 
-c2.image(cv2.cvtColor(draw_boxes(bgr, lines), cv2.COLOR_BGR2RGB),
-         caption=f"인식 박스 {len(lines)}개", use_container_width=True)
+show_img(c2, draw_boxes(bgr, lines), f"인식 박스 {len(lines)}개")
 st.write(f"**{L['candidates']}: {len(names)}** — {', '.join(names[:20])}{' …' if len(names) > 20 else ''}")
 
 items = data.get("items", [])

@@ -35,3 +35,4 @@ Thumbs.db
 
 # ── 로컬 dev 설정 ──
 .claude/
+data/ocr_cache.pkl

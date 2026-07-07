@@ -43,7 +43,7 @@ menueye_v2/
 ├── notebooks/
 │   └── 01_EDA_MenuEye.ipynb      # EDA(데이터·신뢰도·개선·오류분포)
 └── data/
-    ├── menu_images/menu/한국/    # 한식 메뉴판 25장 (도메인 데이터)
+    ├── menu_images/menu/한국/    # 한식 메뉴판 25장 (크롤링 수집·도메인 데이터)
     ├── truth_*.txt               # 원어민 정답 라벨(총 246개 메뉴명)
     └── ocr_results/
         ├── benchmark.csv         # v3 vs v5 채점표
