@@ -32,10 +32,13 @@ menueye_v2/
 ├── MenuEye_benchmark_colab.ipynb # Colab GPU 벤치마크 노트북
 ├── scripts/
 │   ├── run_ocr.py                # PaddleOCR 래퍼(한국어 v5)
+│   ├── run_clova.py              # 상용 CLOVA OCR 호출(비교 기준)
 │   ├── menu_to_prompt.py         # OCR→병합→프롬프트→LLM 파이프라인
 │   ├── compare_menu.py           # 채점(원어민 정답 truth 대비)
 │   ├── benchmark_ocr.py          # PP-OCRv3 vs v5 복원율 벤치마크
-│   ├── plot_benchmark.py         # 벤치마크 막대그래프
+│   ├── benchmark_clova.py        # +CLOVA 열(v3/v5와 동일 잣대)
+│   ├── plot_benchmark.py         # 벤치마크 막대그래프(v3/v5)
+│   ├── plot_benchmark_3models.py # 3-모델 그래프(v3/v5/CLOVA)
 │   └── build_eda.py              # EDA 노트북 생성
 ├── notebooks/
 │   └── 01_EDA_MenuEye.ipynb      # EDA(데이터·신뢰도·개선·오류분포)
@@ -57,13 +60,17 @@ pip install -r requirements.txt
 - OCR 모델(PP-OCRv3/v5 한국어)은 **최초 실행 시 자동 다운로드**된다.
 - Windows CPU에서 PaddlePaddle 3.x oneDNN 버그 회피용으로 `FLAGS_enable_pir_api=0` 환경변수를 사용한다(코드가 자동 설정).
 
-### API 키 (LLM 해석에만 필요)
+### API 키 (LLM 해석 / CLOVA 비교에만 필요)
 `.gitignore`로 커밋되지 않는다. 프로젝트 루트에 키 파일을 두거나 환경변수로 설정:
 ```bash
 # 파일 방식 (권장): gemini_key.txt / openai_key.txt 에 키 한 줄
 # 또는 환경변수
 export GEMINI_API_KEY="..."     # Windows: $env:GEMINI_API_KEY="..."
 export OPENAI_API_KEY="..."
+
+# CLOVA OCR 비교(선택): clova_url.txt / clova_secret.txt  또는
+export CLOVA_OCR_URL="APIGW Invoke URL"   # 예: .../external/v1/.../general
+export CLOVA_OCR_SECRET="X-OCR-SECRET 값"
 ```
 
 ---
@@ -82,12 +89,15 @@ python scripts/menu_to_prompt.py "data/menu_images/menu/한국/4.jpg" --llm gemi
 # --llm 생략 시 프롬프트만 생성(복붙용)
 ```
 
-### 3) 벤치마크 (PP-OCRv3 vs v5 복원율)
+### 3) 벤치마크 (PP-OCRv3 vs v5, +상용 CLOVA)
 ```bash
-python scripts/benchmark_ocr.py     # data/truth_*.txt 자동 발견 → 채점
-python scripts/plot_benchmark.py    # 차트 생성
+python scripts/benchmark_ocr.py         # v3 vs v5, data/truth_*.txt 자동 발견 → 채점
+python scripts/plot_benchmark.py        # v3/v5 차트
+python scripts/benchmark_clova.py       # +CLOVA 열(동일 병합·채점) → benchmark_clova.csv
+python scripts/plot_benchmark_3models.py # 3-모델 차트(v3/v5/CLOVA)
 ```
 > CPU에서 느리면 `MenuEye_benchmark_colab.ipynb`로 **Colab T4 GPU**에서 실행(정확도 그대로, 수 분).
+> CLOVA는 확장자만 `.jpg`인 WebP 등을 cv2로 PNG 재인코딩해 전송(`run_clova.py`).
 
 ### 4) 채점 (특정 이미지)
 ```bash
@@ -99,11 +109,13 @@ python scripts/compare_menu.py --truth data/truth_4.txt --output data/explained.
 ## 결과
 
 **메뉴명 복원율: PP-OCRv3 65% → PP-OCRv5 84%** (+19%p, 25장 246개 메뉴)
+**상용 비교 기준 CLOVA OCR = 87%** — 오픈소스 v5(84%)와 단 **3%p 차**.
 
-![benchmark](data/ocr_results/benchmark_chart.png)
+![benchmark](data/ocr_results/benchmark_chart_clova.png)
 
 - **모델 선택(v3→v5)이 정확도의 핵심 지렛대** — 특히 저해상도(6.jpg 50→100%)·초고밀도(5.png 27→68%)·손글씨(8.png 0→57%)에서 결정적.
-- 단, v5도 만능은 아니며 일부 세로쓰기·특이 레이아웃(12·19·22번)에선 하락 — 정직한 한계로 분석에 포함.
+- **상용 대비 경쟁력** — 무료 오픈소스 v5(84%)가 상용 CLOVA(87%)에 근접. '강한 사전모델 + 좌표 후처리'만으로 달성(파인튜닝 없이).
+- **구조적 한계 확증** — 세로쓰기 12번은 v5·CLOVA **둘 다 0%**. 상용 최고 모델조차 실패 → 남은 병목은 '모델 성능'이 아니라 '레이아웃 구조'. (v5 회귀 12·19·22번도 정직한 한계로 분석에 포함)
 - 정확도 향상은 **'학습(파인튜닝)'이 아니라 ① 강한 사전모델 선택 + ② 좌표 후처리 + ③ LLM 프롬프트**로 달성(데이터 25장은 rec 파인튜닝엔 부족). 자세한 내용은 `WORKLOG.md`·`오류사례분석.md` 참고.
 
 ---
